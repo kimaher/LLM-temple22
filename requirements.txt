@@ -1,0 +1,19 @@
+# Core: model, training, inference.
+# Install PyTorch first from https://pytorch.org for your CUDA version, e.g.
+#   pip install torch --index-url https://download.pytorch.org/whl/cu121
+torch>=2.2
+numpy>=1.24
+requests>=2.31          # corpus download
+
+# Optional tokenizer backend (--tokenizer tiktoken:gpt2). The default BPE
+# tokenizer in tokenizer/bpe.py has no dependencies.
+tiktoken>=0.7
+
+# Web backend
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.5
+
+# Tests
+pytest>=8.0
+httpx>=0.27             # required by fastapi.testclient

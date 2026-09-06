@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Generated artifacts: all reproducible from the scripts in this repo
+data/raw/
+data/processed/
+tokenizer/artifacts/
+checkpoints/
+runs/
+
+# Frontend
+node_modules/
+dist/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store

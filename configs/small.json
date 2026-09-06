@@ -1,0 +1,14 @@
+{
+  "vocab_size": 8192,
+  "n_layers": 8,
+  "n_heads": 8,
+  "n_kv_heads": 4,
+  "d_model": 512,
+  "ffn_hidden": null,
+  "ffn_multiple_of": 64,
+  "max_seq_len": 512,
+  "dropout": 0.05,
+  "rope_theta": 10000.0,
+  "norm_eps": 1e-05,
+  "tie_embeddings": true
+}
