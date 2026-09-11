@@ -116,8 +116,8 @@ class BPETokenizer:
             print(f"  {len(word_freqs):,} unique words, learning {n_merges:,} merges")
 
         # 2. initial pair statistics + an index from pair -> words containing it
-        pair_counts: Counter[Pair] = Counter()
-        pair_where: Dict[Pair, set] = defaultdict(set)
+        pair_counts: Counter[Pair] = Counter() # how many times does this pair occur in the text
+        pair_where: Dict[Pair, set] = defaultdict(set) # which word indices contain this pair
         for wi, symbols in enumerate(words):
             f = freqs[wi]
             for pair in zip(symbols, symbols[1:]):

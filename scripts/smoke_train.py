@@ -36,9 +36,9 @@ def make_batch(batch_size: int, seq_len: int, device: str) -> tuple[torch.Tensor
     Learnable, but only if the model can actually see the previous token - so a
     broken causal mask or broken positions show up immediately as a stuck loss.
     """
-    starts = torch.randint(0, VOCAB, (batch_size, 1), device=device)
-    offsets = torch.arange(seq_len + 1, device=device)[None, :] * STRIDE
-    seq = (starts + offsets) % VOCAB
+    starts = torch.randint(0, VOCAB, (batch_size, 1), device=device) # (batch, 1)
+    offsets = torch.arange(seq_len + 1, device=device)[None, :] * STRIDE # (1, seq_len+1)
+    seq = (starts + offsets) % VOCAB # (batch, seq_len+1)
     return seq[:, :-1], seq[:, 1:]  # inputs, next-token targets
 
 
