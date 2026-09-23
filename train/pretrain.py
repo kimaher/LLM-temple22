@@ -223,9 +223,12 @@ def main() -> None:
             val = losses.get("val", losses["train"])
 
             raw_model = getattr(model, "_orig_mod", model)  # unwrap torch.compile
-            save_checkpoint(out_dir / "last.pt", raw_model, optimizer, step=step, best_val_loss=best_val)
-            if val < best_val:
+            # update best_val before saving last.pt so --resume restores the true best
+            is_best = val < best_val
+            if is_best:
                 best_val = val
+            save_checkpoint(out_dir / "last.pt", raw_model, optimizer, step=step, best_val_loss=best_val)
+            if is_best:
                 save_checkpoint(out_dir / "best.pt", raw_model, optimizer, step=step, best_val_loss=best_val)
                 print(f"  new best val loss {best_val:.4f} -> {out_dir / 'best.pt'}")
 

@@ -74,9 +74,9 @@ def build_rope_cache(
     # inv_freq[i] = 1 / theta^(2i/head_dim) for i in [0, head_dim/2)
     inv_freq = 1.0 / (theta ** (torch.arange(0, head_dim, 2, device=device).float() / head_dim))
     t = torch.arange(max_seq_len, device=device).float()
-    freqs = torch.outer(t, inv_freq)  # (T, head_dim/2)
+    freqs = torch.outer(t, inv_freq)  # (max_seq_len, head_dim/2)
     # Duplicated so the table lines up with the "rotate half" split below.
-    emb = torch.cat((freqs, freqs), dim=-1)  # (T, head_dim)
+    emb = torch.cat((freqs, freqs), dim=-1)  # (max_seq_len, head_dim)
     return emb.cos(), emb.sin()
 
 
