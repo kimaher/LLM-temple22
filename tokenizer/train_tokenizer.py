@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import time
-from pathlib import Path
 
 from .bpe import BPETokenizer
 from .tokenizer import SPECIAL_TOKENS
@@ -32,10 +31,11 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    text = Path(args.input).read_text(encoding="utf-8", errors="replace")
-    if len(text) > args.max_chars:
-        print(f"truncating corpus {len(text):,} -> {args.max_chars:,} chars for tokenizer training")
-        text = text[: args.max_chars]
+    # Read only what we train on: the corpus may be several GB.
+    with open(args.input, encoding="utf-8", errors="replace") as f:
+        text = f.read(args.max_chars)
+        if f.read(1):
+            print(f"using the first {args.max_chars:,} chars of the corpus for tokenizer training")
 
     print(f"training BPE: {len(text):,} chars -> vocab_size={args.vocab_size}")
     t0 = time.perf_counter()

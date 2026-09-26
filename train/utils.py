@@ -58,7 +58,10 @@ def pick_dtype(device: str, requested: str = "auto") -> torch.dtype:
     if requested != "auto":
         return {"float32": torch.float32, "bfloat16": torch.bfloat16, "float16": torch.float16}[requested]
     if device.startswith("cuda"):
-        return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+        # is_bf16_supported() also returns True on pre-Ampere GPUs (e.g. RTX 2080),
+        # where bf16 is emulated and slow; native bf16 needs compute capability >= 8.0.
+        major, _ = torch.cuda.get_device_capability(device)
+        return torch.bfloat16 if major >= 8 else torch.float16
     return torch.float32
 
 

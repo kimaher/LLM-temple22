@@ -140,9 +140,12 @@ def main() -> None:
         if (step > 0 and step % args.eval_interval == 0) or is_last:
             val = evaluate(model, val_ds, amp, args.eval_iters, args.batch_size, device) if val_ds else total_loss
             print(f"  eval @ {step}: {'val' if val_ds else 'train'} {val:.4f}")
-            save_checkpoint(out_dir / "last.pt", model, optimizer, step=step, best_val_loss=best_val)
-            if val < best_val:
+            # update best_val before saving last.pt so it records the true best
+            is_best = val < best_val
+            if is_best:
                 best_val = val
+            save_checkpoint(out_dir / "last.pt", model, optimizer, step=step, best_val_loss=best_val)
+            if is_best:
                 save_checkpoint(out_dir / "best.pt", model, optimizer, step=step, best_val_loss=best_val)
 
     log_file.close()

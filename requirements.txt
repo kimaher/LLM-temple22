@@ -4,6 +4,7 @@
 torch>=2.2
 numpy>=1.24
 requests>=2.31          # corpus download
+pyarrow>=14             # parquet corpora (cosmopedia, fineweb-edu, smoltalk)
 
 # Optional tokenizer backend (--tokenizer tiktoken:gpt2). The default BPE
 # tokenizer in tokenizer/bpe.py has no dependencies.

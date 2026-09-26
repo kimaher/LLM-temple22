@@ -15,16 +15,23 @@ in RAM.
 
 Documents are separated by the `<|eot|>` token so the model learns where a
 document ends instead of hallucinating across boundaries.
+
+The input is streamed from disk and tokenized on `--workers` processes, so a
+multi-GB corpus needs neither multi-GB of RAM nor an hour on one core.
 """
 
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
+import os
 import re
+import time
 import unicodedata
+from multiprocessing import Pool
 from pathlib import Path
-from typing import Iterator, List
+from typing import Iterator, List, Optional
 
 import numpy as np
 
@@ -54,15 +61,54 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
-def split_documents(text: str, doc_sep: str, min_chars: int) -> Iterator[str]:
-    """Split the corpus into documents and drop the near-empty ones."""
-    if not doc_sep:
-        yield text
-        return
-    for doc in text.split(doc_sep):
-        doc = doc.strip()
-        if len(doc) >= min_chars:
-            yield doc
+_READ_CHARS = 1 << 24  # 16M chars per read; bounds memory regardless of corpus size
+
+
+def iter_documents(path: Path, doc_sep: str, min_chars: int) -> Iterator[str]:
+    """Stream cleaned documents from `path`, dropping the near-empty ones.
+
+    Text mode already turns \\r\\n and \\r into \\n.  Invisible characters and
+    trailing whitespace are removed *before* splitting, because a "blank" line
+    holding a space or a zero-width char should still separate documents.  The
+    text after the last separator in each read is carried into the next one,
+    so separators (and those regexes) straddling a read boundary still match.
+    """
+    with open(path, encoding="utf-8", errors="replace") as f:
+        if not doc_sep:
+            doc = clean_text(f.read())
+            if len(doc) >= min_chars:
+                yield doc
+            return
+        carry = ""
+        while True:
+            chunk = f.read(_READ_CHARS)
+            buf = _TRAILING_SPACE.sub("\n", _INVISIBLE.sub("", carry + chunk))
+            parts = buf.split(doc_sep)
+            carry = parts.pop() if chunk else ""
+            for part in parts:
+                doc = clean_text(part)
+                if len(doc) >= min_chars:
+                    yield doc
+            if not chunk:
+                return
+
+
+# Per-process tokenizer, built once by the pool initializer rather than pickled
+# into every task.
+_tok = None
+
+
+def _init_worker(spec: Optional[str]) -> None:
+    global _tok
+    _tok = load_tokenizer(spec)
+
+
+def _encode(doc: str) -> np.ndarray:
+    ids = _tok.encode(doc, allowed_special=False)
+    ids.append(_tok.eot_id)  # document boundary
+    # uint32 pickles far smaller than a list of Python ints on the way back
+    # from the worker; ShardWriter narrows it to the output dtype.
+    return np.asarray(ids, dtype=np.uint32)
 
 
 class ShardWriter:
@@ -73,24 +119,28 @@ class ShardWriter:
         self.split = split
         self.dtype = dtype
         self.shard_tokens = shard_tokens
-        self.buffer: List[int] = []
+        self.buffer: List[np.ndarray] = []
+        self.buffered = 0
         self.shard_index = 0
         self.total = 0
 
-    def add(self, ids: List[int]) -> None:
-        self.buffer.extend(ids)
-        while len(self.buffer) >= self.shard_tokens:
-            self._flush(self.buffer[: self.shard_tokens])
-            self.buffer = self.buffer[self.shard_tokens :]
+    def add(self, ids: np.ndarray) -> None:
+        self.buffer.append(ids)
+        self.buffered += len(ids)
+        while self.buffered >= self.shard_tokens:
+            flat = np.concatenate(self.buffer)
+            self._flush(flat[: self.shard_tokens])
+            rest = flat[self.shard_tokens :]
+            self.buffer, self.buffered = [rest], len(rest)
 
     def close(self) -> None:
-        if self.buffer:
-            self._flush(self.buffer)
-            self.buffer = []
+        if self.buffered:
+            self._flush(np.concatenate(self.buffer))
+        self.buffer, self.buffered = [], 0
 
-    def _flush(self, ids: List[int]) -> None:
-        path = self.out_dir / f"{self.split}_{self.shard_index:06d}.bin"
-        np.array(ids, dtype=self.dtype).tofile(path)
+    def _flush(self, ids: np.ndarray) -> None:
+        path =self.out_dir / f"{self.split}_{self.shard_index:06d}.bin"
+        ids.astype(self.dtype).tofile(path)
         self.total += len(ids)
         self.shard_index += 1
         print(f"  wrote {path.name}: {len(ids):,} tokens")
@@ -106,6 +156,7 @@ def main() -> None:
     ap.add_argument("--val-fraction", type=float, default=0.01)
     ap.add_argument("--shard-tokens", type=int, default=10_000_000)
     ap.add_argument("--limit-docs", type=int, default=0, help="dev mode: only process the first N documents")
+    ap.add_argument("--workers", type=int, default=os.cpu_count() or 1, help="tokenizer processes (1 = in-process)")
     args = ap.parse_args()
 
     tok = load_tokenizer(args.tokenizer)
@@ -119,29 +170,45 @@ def main() -> None:
     # bigger (e.g. tiktoken's 50k+specials is still fine, but be safe) uses uint32.
     dtype = np.uint16 if tok.vocab_size < 2**16 else np.uint32
 
-    text = clean_text(Path(args.input).read_text(encoding="utf-8", errors="replace"))
-    docs = list(split_documents(text, args.doc_sep, args.min_chars))
-    if args.limit_docs:
-        docs = docs[: args.limit_docs]
-    n_val = max(1, int(len(docs) * args.val_fraction)) if len(docs) > 1 else 0
+    # Pass 1 only counts, so the train/val boundary is known before pass 2
+    # streams the same documents through the tokenizer.
+    def docs() -> Iterator[str]:
+        it = iter_documents(Path(args.input), args.doc_sep, args.min_chars)
+        return itertools.islice(it, args.limit_docs) if args.limit_docs else it
+
+    n_docs = n_chars = 0
+    for doc in docs():
+        n_docs += 1
+        n_chars += len(doc)
+    n_val = max(1, int(n_docs * args.val_fraction)) if n_docs > 1 else 0
     # Hold out a contiguous tail rather than a random sample: with a random
     # sample, near-duplicate neighbouring documents leak between the splits.
-    train_docs, val_docs = docs[: len(docs) - n_val], docs[len(docs) - n_val :]
-    print(f"{len(docs):,} documents -> {len(train_docs):,} train / {len(val_docs):,} val")
+    n_train = n_docs - n_val
+    print(f"{n_docs:,} documents -> {n_train:,} train / {n_val:,} val, {args.workers} worker(s)")
 
+    # imap keeps document order, so the first n_train results are train and
+    # the rest are val, exactly as if tokenized serially.
+    writers = {s: ShardWriter(out_dir, s, dtype, args.shard_tokens) for s in ("train", "val")}
+    pool = Pool(args.workers, _init_worker, (args.tokenizer,)) if args.workers > 1 else None
+    if pool is None:
+        _init_worker(args.tokenizer)
+    encoded = pool.imap(_encode, docs(), chunksize=64) if pool else map(_encode, docs())
+    t0 = time.perf_counter()
+    try:
+        for i, ids in enumerate(encoded):
+            writers["train" if i < n_train else "val"].add(ids)
+            if (i + 1) % 20_000 == 0:
+                rate = (i + 1) / (time.perf_counter() - t0)
+                print(f"  {i + 1:,}/{n_docs:,} docs ({rate:,.0f} docs/s)")
+    finally:
+        if pool:
+            pool.close()
+            pool.join()
     counts = {}
-    for split, split_docs in (("train", train_docs), ("val", val_docs)): # this thing runs twice, once for train and once for val
-        if not split_docs:
-            continue
-        writer = ShardWriter(out_dir, split, dtype, args.shard_tokens)
-        for i, doc in enumerate(split_docs):
-            ids = tok.encode(doc, allowed_special=False)
-            ids.append(tok.eot_id)  # document boundary
-            writer.add(ids)
-            if (i + 1) % 5000 == 0:
-                print(f"  {split}: {i + 1:,}/{len(split_docs):,} docs")
+    for split, writer in writers.items():
         writer.close()
-        counts[split] = writer.total
+        if writer.total:
+            counts[split] = writer.total
 
     meta = {
         "name": name,
@@ -155,7 +222,7 @@ def main() -> None:
     (out_dir / "meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     total = sum(counts.values())
     print(f"\n{total:,} tokens total -> {out_dir}")
-    print(f"compression: {len(text) / max(1, total):.2f} chars/token")
+    print(f"compression: {n_chars / max(1, total):.2f} chars/token")
 
 
 if __name__ == "__main__":

@@ -61,6 +61,27 @@ python -m train.sft --init checkpoints/pretrain/best.pt --data data/sft_sample.j
 python -m inference.chat --checkpoint checkpoints/sft/best.pt
 ```
 
+### Training a chat assistant
+
+The Shakespeare/TinyStories corpora teach English, not answering. For an
+assistant, pretrain on explanatory text and instruction-tune on real chats.
+
+Size the pretraining data to the model: roughly 20 tokens per parameter, so
+~560M tokens for `small.json`. A Cosmopedia shard is ~78k documents, ~85M
+tokens with an 8k vocab, so 7 shards covers it (~8 min to prepare on 24 cores).
+At 16 x 512 tokens per step that is ~68k steps; raise `--batch-size` /
+`--grad-accum` to cut the step count.
+
+```bash
+python -m data.download --corpus cosmopedia-stanford --shards 7
+python -m tokenizer.train_tokenizer --input data/raw/cosmopedia-stanford.txt --vocab-size 8192
+python -m data.prepare --input data/raw/cosmopedia-stanford.txt --doc-sep "<|doc|>"
+python -m train.pretrain --data data/processed/cosmopedia-stanford --model-config configs/small.json
+
+python -m data.download --corpus smol-smoltalk --max-docs 20000   # or everyday-conversations
+python -m train.sft --init checkpoints/pretrain/best.pt --data data/raw/smol-smoltalk.jsonl
+```
+
 Model presets live in [configs/](configs/): `dev.json` (0.5M params, for smoke
 tests), `tiny.json` (4M), `small.json` (28M, GQA). They are plain JSON dumps of
 [`ModelConfig`](model/config.py), and every checkpoint stores the config that
