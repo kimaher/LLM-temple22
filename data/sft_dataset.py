@@ -47,7 +47,9 @@ class SFTDataset:
         self.examples: List[Tuple[List[int], List[int]]] = []  # (ids, mask)
 
         skipped = 0
-        for line in Path(path).read_text(encoding="utf-8").splitlines():
+        # JSONL records end at "\n" only.  str.splitlines() would also break on
+        # U+2028, \x0c, etc., which can legally appear unescaped inside strings.
+        for line in Path(path).read_text(encoding="utf-8").split("\n"):
             line = line.strip()
             if not line:
                 continue
