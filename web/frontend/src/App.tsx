@@ -65,7 +65,9 @@ export default function App() {
   const engineLabel = health
     ? health.engine === "mock"
       ? "mock engine - no checkpoint loaded"
-      : `${((health.info.params as number) / 1e6).toFixed(1)}M params on ${health.info.device}`
+      : health.engine === "hf"
+        ? `${health.info.model} - ${((health.info.params as number) / 1e9).toFixed(1)}B params on ${health.info.device}`
+        : `${((health.info.params as number) / 1e6).toFixed(1)}M params on ${health.info.device}`
     : "backend offline";
 
   return (
@@ -73,7 +75,7 @@ export default function App() {
       <header className="header">
         <div>
           <h1>LLM-temple22</h1>
-          <span className={`badge ${health?.engine === "model" ? "badge-live" : "badge-mock"}`}>
+          <span className={`badge ${health && health.engine !== "mock" ? "badge-live" : "badge-mock"}`}>
             {engineLabel}
           </span>
         </div>

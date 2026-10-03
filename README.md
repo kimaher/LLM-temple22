@@ -96,11 +96,18 @@ LLM_MOCK=1 uvicorn web.backend.main:app --reload --port 8000
 # backend - real checkpoint
 LLM_CHECKPOINT=checkpoints/sft/best.pt uvicorn web.backend.main:app --port 8000
 
+# backend - pretrained Hugging Face model for comparison (pip install transformers accelerate)
+python -m web.backend.serve --hf                        # Qwen/Qwen3.5-2B
+python -m web.backend.serve --hf Qwen/Qwen3.5-0.8B      # any HF chat model id
+
 # frontend (proxies /chat and /health to :8000)
 cd web/frontend && npm install && npm run dev     # http://localhost:5173
 ```
 
-Environment variables: `LLM_MOCK`, `LLM_CHECKPOINT`, `LLM_TOKENIZER`,
+`python -m web.backend.serve --help` lists all flags (`--mock`, `--hf`,
+`--checkpoint`, `--tokenizer`, `--thinking`, `--device`, `--port`, `--reload`).
+They map onto environment variables, which also work with plain `uvicorn`:
+`LLM_MOCK`, `LLM_HF_MODEL`, `LLM_HF_THINKING`, `LLM_CHECKPOINT`, `LLM_TOKENIZER`,
 `LLM_DEVICE`. If the checkpoint is missing or fails to load, the server logs why
 and falls back to the mock engine rather than refusing to boot.
 
