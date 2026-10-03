@@ -39,6 +39,15 @@ GPT2_SPLIT_PATTERN = (
 
 Pair = Tuple[int, int]
 
+# Merging is quadratic in a pre-token's length, and web text has pre-tokens
+# hundreds of KB long (unspaced CJK/Thai, base64, "=====" rules).  One of those
+# can stall encoding for hours, so longer pieces are BPE'd in slices of this
+# many bytes.  Learned tokens are far shorter, so normal text is unaffected.
+MAX_PIECE_BYTES = 64
+
+# Most pre-tokens are common words; caching them skips the merge loop.
+_CACHE_SIZE = 1 << 17
+
 
 class BPETokenizer:
     """Byte-level BPE with a learned merge table and optional special tokens."""
@@ -57,6 +66,7 @@ class BPETokenizer:
         self.special_tokens: Dict[str, int] = dict(special_tokens or {})
         self._special_inv: Dict[int, str] = {v: k for k, v in self.special_tokens.items()}
         self._special_re = self._build_special_re()
+        self._cache: Dict[bytes, Tuple[int, ...]] = {}
         self._vocab = self._build_vocab()
 
     # ------------------------------------------------------------------ #
@@ -191,11 +201,22 @@ class BPETokenizer:
             ids = _merge_symbols(ids, pair, 256 + self.ranks[pair])
         return ids
 
+    def _encode_piece(self, piece: bytes) -> Tuple[int, ...]:
+        cached = self._cache.get(piece)
+        if cached is None:
+            cached = tuple(self._encode_chunk(piece))
+            if len(self._cache) >= _CACHE_SIZE:
+                self._cache.clear()
+            self._cache[piece] = cached
+        return cached
+
     def encode_ordinary(self, text: str) -> List[int]:
         """Encode, treating any special-token text as ordinary characters."""
         out: List[int] = []
         for piece in self._compiled.findall(text):
-            out.extend(self._encode_chunk(piece.encode("utf-8")))
+            b = piece.encode("utf-8")
+            for start in range(0, len(b), MAX_PIECE_BYTES):
+                out.extend(self._encode_piece(b[start : start + MAX_PIECE_BYTES]))
         return out
 
     def encode(self, text: str, allowed_special: bool = True) -> List[int]:

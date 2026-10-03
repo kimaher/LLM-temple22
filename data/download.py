@@ -71,6 +71,13 @@ CORPORA: Dict[str, Corpus] = {
         kind="parquet-text",
         shards=2,
     ),
+    "cosmopedia-v2": Corpus(
+        url=f"{_HF}/HuggingFaceTB/smollm-corpus/resolve/main/cosmopedia-v2/train-{{i:05d}}-of-00104.parquet",
+        filename="cosmopedia-v2.txt",
+        description="SmolLM's synthetic textbooks/stories (1.2 GB/shard, ~376k docs). Pairs with fineweb-edu.",
+        kind="parquet-text",
+        shards=104,
+    ),
     "fineweb-edu": Corpus(
         url=f"{_HF}/HuggingFaceFW/fineweb-edu/resolve/main/sample/10BT/{{i:03d}}_00000.parquet",
         filename="fineweb-edu.txt",
